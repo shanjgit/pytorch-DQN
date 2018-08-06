@@ -84,8 +84,14 @@ class Agent:
             self._reset()
         return done_reward
 
+def str2bool(s):
+    if type(s)==bool: return s
+    if s.lower() in ['true', '1']:
+        return True
+    return False
 
-def adjust_lr(optimizer, epoch, init_lr, decay_rate=0.96, decay_steps=20):
+
+def adjust_lr(optimizer, epoch, init_lr, decay_rate=0.999, decay_steps=200000):
     """Reducing learning rate exponentially for every decay_steps
 
     :param optimizer: (object) pytorch optimizer
@@ -120,11 +126,12 @@ def calc_loss(batch, net, tgt_net, device="cpu"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cuda", default=False, action="store_true", help="Enable cuda")
+    parser.add_argument("--cuda", default=True, action="store_true", help="Enable cuda")
     parser.add_argument("--env", default=DEFAULT_ENV_NAME,
                         help="Name of the environment, default=" + DEFAULT_ENV_NAME)
     parser.add_argument("--reward", type=float, default=MEAN_REWARD_BOUND,
                         help="Mean reward boundary for stop of training, default=%.2f" % MEAN_REWARD_BOUND)
+    parser.add_argument("--decay", default=False, help="enable lr decay")
     args = parser.parse_args()
     device = torch.device("cuda" if args.cuda else "cpu")
 
@@ -132,7 +139,8 @@ if __name__ == "__main__":
 
     net = model.DQN(env.observation_space.shape, env.action_space.n).to(device)
     tgt_net = model.DQN(env.observation_space.shape, env.action_space.n).to(device)
-    writer = SummaryWriter(comment="-" + args.env)
+    decay_tag = {True:"-decay-0.999-update_freq-200000-", False:"-no-decay-"}
+    writer = SummaryWriter(comment=decay_tag[str2bool(args.decay)] + args.env)
     print(net)
 
     buffer = ExperienceBuffer(REPLAY_SIZE)
@@ -147,7 +155,8 @@ if __name__ == "__main__":
     best_mean_reward = None
 
     while True:
-        adjust_lr(optimizer, frame_idx, LEARNING_RATE)
+        if str2bool(args.decay):
+            adjust_lr(optimizer, frame_idx, LEARNING_RATE)
         frame_idx += 1
         epsilon = max(EPSILON_FINAL, EPSILON_START - frame_idx / EPSILON_DECAY_LAST_FRAME)
 
@@ -167,7 +176,7 @@ if __name__ == "__main__":
             writer.add_scalar("reward_100", mean_reward, frame_idx)
             writer.add_scalar("reward", reward, frame_idx)
             if best_mean_reward is None or best_mean_reward < mean_reward:
-                torch.save(net.state_dict(), args.env + "-best.dat")
+                torch.save(net.state_dict(), args.env +decay_tag[str2bool(args.decay)] +"-best.dat")
                 if best_mean_reward is not None:
                     print("Best mean reward updated %.3f -> %.3f, model saved" % (best_mean_reward, mean_reward))
                 best_mean_reward = mean_reward
